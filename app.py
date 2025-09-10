@@ -3,6 +3,7 @@ import requests
 from datetime import datetime
 import random
 from streamlit.components.v1 import html
+from groq import Groq
 
 # ======================
 # 1. INITIALIZATION & CONFIG
@@ -267,58 +268,75 @@ def handle_login(email, password):
         return False, f"Connection error: {str(e)}", None
 
 # ======================
-# 3. LLM INTEGRATION
+# 3. GROQ LLM INTEGRATION (UPDATED)
 # ======================
+def initialize_groq_client():
+    """Initialize Groq client with API key from Streamlit secrets"""
+    if not hasattr(st, 'secrets') or "groq" not in st.secrets:
+        raise Exception("Missing Groq API configuration in secrets")
+    
+    return Groq(api_key=st.secrets.groq.api_key)
+
 def get_verified_response(prompt):
-    """Production-ready query with academic sources using Groq API"""
+    """Production-ready query with academic sources using Groq Gemma2 model"""
     try:
-        if not hasattr(st, 'secrets') or "llama" not in st.secrets:
-            return None, ["Missing LLM API configuration"]
-            
-        headers = {
-            "Authorization": f"Bearer {st.secrets.llama.api_key}",
-            "Content-Type": "application/json"
-        }
+        client = initialize_groq_client()
         
-        payload = {
-            "model": "llama3-70b-8192",
-            "messages": [
+        # Enhanced system prompt for better fact verification
+        system_prompt = f"""You are a senior academic researcher and fact-checker. Your task is to:
+
+1. Provide accurate, well-researched information current to {datetime.now().strftime('%B %Y')}
+2. Verify claims with evidence-based reasoning
+3. Cite 3-5 reliable academic sources
+4. Be transparent about limitations or uncertainties
+
+Format your response as:
+- Clear, factual answer
+- Evidence and reasoning
+- Sources section with format: [Title](URL) - Author (Year) or DOI:...
+
+Separate your main response from sources using ###SOURCES### as a divider."""
+
+        # Create the completion with streaming
+        completion = client.chat.completions.create(
+            model="gemma2-9b-it",
+            messages=[
                 {
                     "role": "system",
-                    "content": f"""You are a senior academic researcher. Provide:
-1. Accurate information current to {datetime.now().strftime('%B %Y')}
-2. 3-5 academic sources (DOIs or .edu/.gov URLs)
-3. Format: [Title](URL) - Author (Year) or DOI:..."""
+                    "content": system_prompt
                 },
                 {
                     "role": "user",
                     "content": prompt
                 }
             ],
-            "temperature": 0.3,
-            "max_tokens": 2000,
-            "top_p": 0.9
-        }
-        
-        response = requests.post(
-            st.secrets.llama.api_url,
-            headers=headers,
-            json=payload,
-            timeout=60
+            temperature=0.3,  # Lower temperature for more factual responses
+            max_tokens=2000,
+            top_p=0.9,
+            stream=True,
+            stop=None
         )
         
-        if response.status_code == 200:
-            content = response.json()["choices"][0]["message"]["content"]
-            if "###SOURCES###" in content:
-                parts = content.split("###SOURCES###")
-                return parts[0].strip(), [s.strip() for s in parts[1].split("\n") if s.strip()]
-            return content, []
+        # Collect the streaming response
+        full_response = ""
+        for chunk in completion:
+            if chunk.choices[0].delta.content:
+                full_response += chunk.choices[0].delta.content
         
-        error_msg = response.json().get("error", {}).get("message", "Unknown API error")
-        return None, [f"API Error: {error_msg}"]
+        # Parse the response to separate content and sources
+        if "###SOURCES###" in full_response:
+            parts = full_response.split("###SOURCES###")
+            main_content = parts[0].strip()
+            sources_text = parts[1].strip()
+            sources = [s.strip() for s in sources_text.split("\n") if s.strip()]
+            return main_content, sources
+        else:
+            # If no sources section, return the full response
+            return full_response.strip(), []
         
     except Exception as e:
-        return None, [f"System Error: {str(e)}"]
+        error_msg = f"Groq API Error: {str(e)}"
+        return None, [error_msg]
 
 # ======================
 # 4. AUTHENTICATION UI (UPDATED)

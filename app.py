@@ -299,7 +299,7 @@ Separate your main response from sources using ###SOURCES### as a divider."""
 
         # Create the completion with streaming
         completion = client.chat.completions.create(
-            model="gemma2-9b-it",
+            model="llama-3.1-8b-instant",
             messages=[
                 {
                     "role": "system",

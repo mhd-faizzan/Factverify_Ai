@@ -13,7 +13,7 @@ init_session()
 if st.session_state.logged_in and is_token_expired():
     st.session_state.clear()
     st.warning("Your session expired. Please log in again.")
-    st.rerun()
+    st.rerun(
 
 if not st.session_state.logged_in:
     show_auth_ui()
